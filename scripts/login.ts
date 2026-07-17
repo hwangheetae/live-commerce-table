@@ -1,8 +1,12 @@
+import { existsSync } from 'node:fs'
 import { chromium, type Response } from 'playwright'
 
 // 원본 사이트(라방바 데이터랩) 주소
 const ORIGIN = 'https://live.ecomm-data.com'
 const SIGN_IN_URL = `${ORIGIN}/user/sign_in`
+
+// 인증 세션(storageState) 저장 경로 — .gitignore에 포함되어 커밋되지 않는다
+const AUTH_STATE_PATH = '.playwright/auth.json'
 
 // 사용자가 직접 로그인할 때까지 기다리는 최대 시간 (10분)
 const LOGIN_TIMEOUT_MS = 10 * 60 * 1000
@@ -20,6 +24,10 @@ const isSignInSuccess = async (response: Response) => {
 }
 
 const main = async () => {
+  if (existsSync(AUTH_STATE_PATH)) {
+    console.log('기존 인증 세션 파일이 있습니다. 로그인 성공 시 덮어씁니다.')
+  }
+
   console.log('브라우저를 실행합니다. 열리는 창에서 직접 로그인해 주세요.')
   console.log('아이디와 비밀번호는 이 프로그램에 저장되지 않습니다.\n')
 
@@ -34,7 +42,12 @@ const main = async () => {
     // 로그인 API 응답(result=1)을 감지할 때까지 대기한다
     await page.waitForResponse(isSignInSuccess, { timeout: LOGIN_TIMEOUT_MS })
     console.log('로그인 감지 완료 (sign_in API result=1)')
-    console.log('(세션 저장은 다음 단계에서 구현됩니다)')
+
+    // 로그인 쿠키가 포함된 브라우저 세션을 파일로 저장한다 (디렉토리는 자동 생성됨)
+    await context.storageState({ path: AUTH_STATE_PATH })
+    console.log(`인증 세션 저장 완료: ${AUTH_STATE_PATH}`)
+    console.log('이제 pnpm dev로 데이터를 조회할 수 있습니다.')
+    console.log('세션이 만료되면 pnpm run login을 다시 실행해 주세요.')
   } catch (error) {
     if (page.isClosed()) {
       console.error('로그인 완료 전에 브라우저가 닫혔습니다. pnpm run login을 다시 실행해 주세요.')
