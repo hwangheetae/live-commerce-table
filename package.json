@@ -10,7 +10,7 @@
     "pnpm": "10.33.0"
   },
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently -n bff,web -c blue,green \"tsx watch server/index.ts\" \"vite\"",
     "login": "tsx scripts/login.ts",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
@@ -19,15 +19,18 @@
     "prepare": "husky"
   },
   "dependencies": {
+    "express": "^5.2.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@types/express": "^5.0.6",
     "@types/node": "^24.13.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "concurrently": "^10.0.3",
     "eslint": "^10.7.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-hooks": "^7.1.1",
