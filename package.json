@@ -11,6 +11,7 @@
   },
   "scripts": {
     "dev": "vite",
+    "login": "tsx scripts/login.ts",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "format": "prettier --write .",
