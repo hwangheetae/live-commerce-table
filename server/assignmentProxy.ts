@@ -1,4 +1,4 @@
-import { chromium, type Browser, type BrowserContext, type Response } from 'playwright'
+import { chromium, type Browser, type BrowserContext, type Page, type Response } from 'playwright'
 import { AUTH_STATE_PATH, hasAuthState } from './authState.ts'
 
 // 프론트엔드가 사용하는 방송 종류 (과제 문서 기준)
@@ -37,6 +37,9 @@ interface AssignmentResponse {
 // 따라서 BFF가 로그인한 브라우저를 직접 소유하고 살아있는 컨텍스트로 조회한다.
 let browser: Browser | null = null
 let context: BrowserContext | null = null
+// 로그인한 사이트 페이지를 열어둔 채 유지한다.
+// 사이트 자체 스크립트가 주기적으로 세션을 갱신하므로, 이 페이지가 살아있어야 세션이 유지된다
+let page: Page | null = null
 let keepAliveTimer: NodeJS.Timeout | null = null
 let ready = false
 
@@ -63,7 +66,7 @@ export const initSession = async (): Promise<void> => {
   // 사용자가 직접 로그인해야 하므로 headful 모드로 실행한다
   browser = await chromium.launch({ headless: false })
   context = await browser.newContext(hasAuthState() ? { storageState: AUTH_STATE_PATH } : {})
-  const page = await context.newPage()
+  page = await context.newPage()
 
   await page.goto(ORIGIN, { waitUntil: 'domcontentloaded' }).catch(() => {})
 
@@ -82,8 +85,9 @@ export const initSession = async (): Promise<void> => {
     console.log('로그인이 완료되었습니다.')
   }
 
-  // 재시작 시 참고용으로 세션을 저장해 둔다 (세션 재사용이 아니라 기록 목적)
-  await context.storageState({ path: AUTH_STATE_PATH })
+  // 사이트 페이지를 열어둔 채 유지해 사이트 스크립트가 세션을 계속 갱신하도록 한다
+  await page.goto(`${ORIGIN}/assignment`, { waitUntil: 'networkidle', timeout: 45_000 }).catch(() => {})
+
   ready = true
   startKeepAlive()
   console.log('데이터 조회 준비 완료.')
@@ -105,20 +109,22 @@ export const fetchAssignmentList = async (type: AssignmentType): Promise<Assignm
 
   const data = (await response.json()) as AssignmentResponse
 
-  // user 정보가 없으면 세션이 만료된 것이다
+  // user 정보가 없으면 세션이 일시적으로 만료된 것이다.
+  // ready는 유지해 열어둔 페이지가 세션을 복구하면 다음 조회가 성공하도록 한다
   if (!data.user) {
-    ready = false
     throw new AuthRequiredError('세션이 만료되었습니다')
   }
 
   return data
 }
 
-// 살아있는 컨텍스트로 주기적으로 ping을 보내 세션을 갱신한다
+// 열어둔 페이지를 주기적으로 새로고침해 사이트가 세션을 갱신하도록 유도한다
 const startKeepAlive = () => {
   stopKeepAlive()
   keepAliveTimer = setInterval(() => {
-    context?.request.post(KEEP_ALIVE_URL, { data: {} }).catch(() => {})
+    void page
+      ?.reload({ waitUntil: 'networkidle', timeout: 30_000 })
+      .catch(() => context?.request.post(KEEP_ALIVE_URL, { data: {} }).catch(() => {}))
   }, KEEP_ALIVE_INTERVAL_MS)
   keepAliveTimer.unref()
 }
@@ -139,5 +145,6 @@ export const closeBrowser = async () => {
   await browser?.close().catch(() => {})
   browser = null
   context = null
+  page = null
   ready = false
 }
