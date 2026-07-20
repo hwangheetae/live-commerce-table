@@ -1,5 +1,6 @@
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
 import { AUTH_STATE_PATH, hasAuthState } from './authState.ts'
+import { loadCategoryMap, mapHsItem, mapLiveItem, type RawHsItem, type RawLiveItem } from './broadcastMapper.ts'
 
 // 프론트엔드가 사용하는 방송 종류 (과제 문서 기준)
 export type AssignmentType = 'live' | 'hs'
@@ -7,9 +8,6 @@ export type AssignmentType = 'live' | 'hs'
 const ORIGIN = 'https://live.ecomm-data.com'
 const API_URL = `${ORIGIN}/api/assignment/list`
 const ASSIGNMENT_URL = `${ORIGIN}/assignment`
-
-// 원본 페이지의 탭 버튼 텍스트 (LIVE=라방, 홈쇼핑)
-const TAB_LABEL: Record<AssignmentType, string> = { live: '라방', hs: '홈쇼핑' }
 
 // 원본 세션은 슬라이딩 TTL이 짧아 방치하면 만료된다.
 // 살아있는 컨텍스트로 주기적으로 조회를 보내 세션을 갱신한다 (20초 간격은 실측으로 검증)
@@ -21,9 +19,10 @@ export class AuthRequiredError extends Error {}
 // 원본 페이지에서 데이터를 얻지 못한 경우
 export class UpstreamError extends Error {}
 
-// 세션 인증 확인용 원본 API 응답 형태
+// 원본 API 응답 형태 (인증 확인용 user + 목록)
 interface AssignmentResponse {
   user?: { nickname?: string }
+  list?: (RawLiveItem | RawHsItem)[]
 }
 
 // UI에 표시하는 방송 정보 (원본 테이블이 렌더링한 텍스트 그대로)
@@ -39,31 +38,6 @@ export interface Broadcast {
   salesAmount: string
   productCount: string
 }
-
-// 원본 /assignment 페이지의 테이블을 파싱하는 스크립트 (브라우저에서 실행)
-// 값을 가공하지 않고 화면에 렌더된 텍스트를 그대로 읽어 과제 테이블과 동일하게 만든다
-const PARSE_TABLE_SCRIPT = `(() => {
-  const rows = Array.from(document.querySelectorAll('table tbody tr'))
-  return rows.map((tr) => {
-    const tds = Array.from(tr.querySelectorAll('td'))
-    const cell = (i) => (tds[i] ? (tds[i].innerText || tds[i].textContent || '').trim() : '')
-    const lines = (i) => cell(i).split('\\n').map((s) => s.trim()).filter(Boolean)
-    const info = lines(1)
-    const dt = lines(3)
-    return {
-      rank: cell(0),
-      title: info[0] || '',
-      platform: info.slice(1).join(' '),
-      category: cell(2),
-      date: dt[0] || '',
-      time: dt[1] || '',
-      visitCount: cell(4),
-      salesCount: cell(5),
-      salesAmount: cell(6),
-      productCount: cell(7),
-    }
-  })
-})()`
 
 // 원본 세션은 로그인한 Chromium 인스턴스(TLS 연결)에 바인딩되므로,
 // storageState 파일을 별도 프로세스로 넘겨도 인증되지 않는다.
@@ -96,6 +70,11 @@ export const initSession = async (): Promise<void> => {
   // 사이트 페이지를 열어둔 채 유지해 사이트 스크립트가 세션을 계속 갱신하도록 한다
   await page.goto(ASSIGNMENT_URL, { waitUntil: 'networkidle', timeout: 45_000 }).catch(() => {})
 
+  // 분류(cid) 표시명을 위한 카테고리 맵 로딩 (인증 불필요, 서버 수명 동안 1회면 충분)
+  await loadCategoryMap().catch((error) => {
+    console.error('카테고리 맵 로딩 실패:', error)
+  })
+
   if (await isAuthenticated(context)) {
     console.log('기존 세션으로 로그인이 확인되었습니다.')
   } else {
@@ -108,39 +87,37 @@ export const initSession = async (): Promise<void> => {
   console.log('데이터 조회 준비 완료.')
 }
 
-// 원본 /assignment 페이지에서 해당 탭의 테이블을 스크래핑해 방송 목록을 가져온다
+// 원본 API가 기대하는 type 값 (프론트엔드 내부 타입 'live'와 다르게 'lb'를 사용한다)
+const UPSTREAM_TYPE: Record<AssignmentType, string> = { live: 'lb', hs: 'hs' }
+
+// 원본 /api/assignment/list를 직접 호출해 원시 데이터를 가져온 뒤,
+// 원본 페이지가 화면에 렌더링할 때 쓰는 것과 동일한 가공 로직으로 변환한다.
+// 로그인 여부와 무관하게 조회한다. 비로그인이면 지표가 마스킹된 값(null)이 내려온다.
 export const fetchAssignmentList = async (type: AssignmentType): Promise<Broadcast[]> => {
-  if (!ready || !context || !page) {
+  if (!ready || !context) {
     throw new AuthRequiredError('세션이 아직 준비되지 않았습니다')
   }
 
-  // 사용자가 창에서 직접 로그인하면 원본이 /assignment를 벗어나 다른 페이지로 이동한다.
-  // 그 상태에서는 탭 버튼을 찾지 못해 클릭이 오래 대기하므로, 조회 전 /assignment로 복귀시킨다.
-  if (!page.url().startsWith(ASSIGNMENT_URL)) {
-    await page.goto(ASSIGNMENT_URL, { waitUntil: 'networkidle', timeout: 30_000 }).catch(() => {})
+  const res = await context.request.post(API_URL, { data: { type: UPSTREAM_TYPE[type] } })
+  if (!res.ok()) {
+    throw new UpstreamError('원본 API 호출에 실패했습니다')
   }
-
-  // 로그인 여부와 무관하게 조회한다. 비로그인이면 지표가 마스킹된 값이 그대로 스크래핑된다.
-  // 해당 탭을 클릭해 테이블을 전환하고, 테이블 갱신(assignment/list 응답)을 기다린다.
-  // 탭 버튼이 없거나 이미 활성인 경우를 대비해 클릭 타임아웃을 짧게 둔다.
-  await Promise.all([
-    page
-      .waitForResponse((r) => r.url().includes('/api/assignment/list'), { timeout: 8_000 })
-      .catch(() => {}),
-    page
-      .getByRole('button', { name: TAB_LABEL[type], exact: true })
-      .click({ timeout: 5_000 })
-      .catch(() => {}),
-  ])
-  await page.waitForTimeout(600)
-
-  const items = (await page.evaluate(PARSE_TABLE_SCRIPT)) as Broadcast[]
-  if (items.length === 0) {
-    throw new UpstreamError('테이블에서 데이터를 찾지 못했습니다')
+  const data = (await res.json()) as AssignmentResponse
+  const list = data.list ?? []
+  if (list.length === 0) {
+    throw new UpstreamError('목록에서 데이터를 찾지 못했습니다')
   }
+  // 이 응답 시점의 로그인 여부. 비로그인이면 지표가 "🔒 로그인"으로 마스킹된다.
+  const authenticated = Boolean(data.user)
 
   // 각 목록은 최대 10개까지만 표시한다
-  return items.slice(0, 10)
+  return list
+    .slice(0, 10)
+    .map((item, i) =>
+      type === 'live'
+        ? mapLiveItem(item as RawLiveItem, i + 1, authenticated)
+        : mapHsItem(item as RawHsItem, i + 1, authenticated),
+    )
 }
 
 // 살아있는 컨텍스트로 주기적으로 실제 조회를 보내 세션을 갱신한다.
