@@ -1,5 +1,4 @@
-import type { AssignmentResponseRaw, AssignmentType, Broadcast } from '../types/assignment.ts'
-import { mapAssignment } from './assignmentMapper.ts'
+import type { AssignmentType, Broadcast } from '../types/assignment.ts'
 
 // BFF가 반환하는 에러 응답 형태
 interface ApiErrorBody {
@@ -19,7 +18,7 @@ export class ApiError extends Error {
 }
 
 // 로컬 BFF(/api/assignment)를 통해 방송 목록을 조회한다
-// 브라우저에서 원본 API를 직접 호출하지 않고 반드시 BFF를 경유한다
+// BFF가 원본 페이지 테이블을 스크래핑해 이미 완성된 값을 반환하므로 별도 변환이 없다
 export const fetchAssignment = async (
   type: AssignmentType,
   signal: AbortSignal,
@@ -32,5 +31,6 @@ export const fetchAssignment = async (
     throw new ApiError(body.code ?? 'UNKNOWN', body.message ?? '데이터 조회에 실패했습니다.')
   }
 
-  return mapAssignment(type, data as AssignmentResponseRaw)
+  const items = (data as { items?: Broadcast[] }).items
+  return Array.isArray(items) ? items : []
 }

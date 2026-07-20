@@ -1,27 +1,21 @@
+import { AssignmentTable } from './components/AssignmentTable.tsx'
 import { useAssignment } from './hooks/useAssignment.ts'
+import './App.css'
 
-// Task 9 임시 확인용 화면 — 테이블/탭은 이후 Task에서 구현한다
+// Task 10 확인용 화면 — 탭/에러 상태 컴포넌트는 이후 Task에서 구현한다
 function App() {
   const { status, data, errorCode, errorMessage } = useAssignment('live')
 
   return (
-    <div style={{ padding: 24, fontFamily: 'sans-serif' }}>
-      <h1>라이브커머스 과제</h1>
-      <p>상태: {status}</p>
+    <div className="app">
+      <h1>라이브커머스 방송 목록</h1>
+      {status === 'loading' && <p>불러오는 중…</p>}
       {status === 'error' && (
-        <p>
+        <p className="error">
           에러({errorCode}): {errorMessage}
         </p>
       )}
-      {status === 'success' && (
-        <ul>
-          {data.map((b) => (
-            <li key={b.id}>
-              [{b.platform}] {b.title} — 매출 {b.salesAmount ?? '-'}
-            </li>
-          ))}
-        </ul>
-      )}
+      {status === 'success' && <AssignmentTable data={data} />}
     </div>
   )
 }

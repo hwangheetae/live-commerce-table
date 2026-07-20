@@ -26,8 +26,8 @@ app.get('/api/assignment', async (req, res) => {
   }
 
   try {
-    const data = await fetchAssignmentList(type)
-    res.json(data)
+    const items = await fetchAssignmentList(type)
+    res.json({ items })
   } catch (error) {
     if (error instanceof AuthRequiredError) {
       res.status(401).json({
