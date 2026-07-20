@@ -13,8 +13,25 @@
   margin-bottom: 16px;
 }
 
-.error {
+.state {
+  padding: 24px 0;
+  color: #555;
+}
+
+.state.error {
   color: #c0392b;
+}
+
+.state .hint {
+  margin-top: 8px;
+  font-size: 0.9rem;
+  color: #666;
+}
+
+.state .hint code {
+  padding: 1px 5px;
+  background: #f2f2f2;
+  border-radius: 3px;
 }
 
 .tabs {

@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { AssignmentTabs } from './components/AssignmentTabs.tsx'
 import { AssignmentTable } from './components/AssignmentTable.tsx'
+import { LoadingState } from './components/LoadingState.tsx'
+import { ErrorState } from './components/ErrorState.tsx'
 import { useAssignment } from './hooks/useAssignment.ts'
 import type { AssignmentType } from './types/assignment.ts'
 import './App.css'
@@ -14,12 +16,8 @@ function App() {
     <div className="app">
       <h1>라이브커머스 방송 목록</h1>
       <AssignmentTabs active={type} onChange={setType} />
-      {status === 'loading' && <p>불러오는 중…</p>}
-      {status === 'error' && (
-        <p className="error">
-          에러({errorCode}): {errorMessage}
-        </p>
-      )}
+      {status === 'loading' && <LoadingState />}
+      {status === 'error' && <ErrorState code={errorCode} message={errorMessage} />}
       {status === 'success' && <AssignmentTable data={data} />}
     </div>
   )
