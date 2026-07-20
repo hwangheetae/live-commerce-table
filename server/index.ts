@@ -4,6 +4,7 @@ import {
   closeBrowser,
   fetchAssignmentList,
   initSession,
+  isLoggedIn,
   isSessionReady,
 } from './assignmentProxy.ts'
 
@@ -12,9 +13,10 @@ const PORT = 5174
 
 const app = express()
 
-// 서버 동작 확인용 엔드포인트 — 세션 준비 여부도 함께 알린다
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, sessionReady: isSessionReady() })
+// 서버 동작 확인용 엔드포인트 — 세션 준비/로그인 여부도 함께 알린다
+// authenticated=false면 비로그인 상태로 지표가 마스킹되어 표시된다
+app.get('/api/health', async (_req, res) => {
+  res.json({ ok: true, sessionReady: isSessionReady(), authenticated: await isLoggedIn() })
 })
 
 // 방송 목록 조회 — 원본 API를 인증 쿠키와 함께 프록시한다
@@ -30,9 +32,9 @@ app.get('/api/assignment', async (req, res) => {
     res.json({ items })
   } catch (error) {
     if (error instanceof AuthRequiredError) {
-      res.status(401).json({
-        code: 'AUTH_REQUIRED',
-        message: '인증 세션이 만료되었습니다. BFF를 재시작(pnpm dev)하여 다시 로그인해 주세요.',
+      res.status(503).json({
+        code: 'SESSION_NOT_READY',
+        message: '세션을 준비하는 중입니다. 잠시 후 다시 시도해 주세요.',
       })
       return
     }

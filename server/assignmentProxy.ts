@@ -1,4 +1,4 @@
-import { chromium, type Browser, type BrowserContext, type Page, type Response } from 'playwright'
+import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
 import { AUTH_STATE_PATH, hasAuthState } from './authState.ts'
 
 // 프론트엔드가 사용하는 방송 종류 (과제 문서 기준)
@@ -6,7 +6,6 @@ export type AssignmentType = 'live' | 'hs'
 
 const ORIGIN = 'https://live.ecomm-data.com'
 const API_URL = `${ORIGIN}/api/assignment/list`
-const SIGN_IN_URL = `${ORIGIN}/user/sign_in`
 const ASSIGNMENT_URL = `${ORIGIN}/assignment`
 
 // 원본 페이지의 탭 버튼 텍스트 (LIVE=라방, 홈쇼핑)
@@ -15,9 +14,8 @@ const TAB_LABEL: Record<AssignmentType, string> = { live: '라방', hs: '홈쇼�
 // 원본 세션은 슬라이딩 TTL이 짧아 방치하면 만료된다.
 // 살아있는 컨텍스트로 주기적으로 조회를 보내 세션을 갱신한다 (20초 간격은 실측으로 검증)
 const KEEP_ALIVE_INTERVAL_MS = 20_000
-const LOGIN_TIMEOUT_MS = 10 * 60 * 1000
 
-// 인증 세션이 없거나 만료된 경우
+// 세션(브라우저)이 아직 준비되지 않은 경우
 export class AuthRequiredError extends Error {}
 
 // 원본 페이지에서 데이터를 얻지 못한 경우
@@ -78,16 +76,6 @@ let page: Page | null = null
 let keepAliveTimer: NodeJS.Timeout | null = null
 let ready = false
 
-// 로그인 API(/api/user/sign_in) 응답이 result=1이면 로그인 성공으로 판단한다
-const isSignInSuccess = async (response: Response) => {
-  if (!response.url().includes('/api/user/sign_in')) return false
-  try {
-    return ((await response.json()) as { result?: unknown })?.result === 1
-  } catch {
-    return false
-  }
-}
-
 // 현재 컨텍스트가 로그인 인증 상태인지 확인한다 (응답에 user 정보가 있으면 인증됨)
 const isAuthenticated = async (ctx: BrowserContext): Promise<boolean> => {
   const res = await ctx.request.post(API_URL, { data: { type: 'hs' } })
@@ -96,32 +84,24 @@ const isAuthenticated = async (ctx: BrowserContext): Promise<boolean> => {
   return Boolean(data.user)
 }
 
-// BFF 시작 시 브라우저를 띄우고 로그인된 컨텍스트를 확보한다
+// BFF 시작 시 브라우저를 띄우고 조회용 컨텍스트를 확보한다.
+// 로그인은 강제하지 않는다. 비로그인 상태에서도 원본 페이지는 목록을 렌더링하며(지표만 마스킹),
+// 사용자가 열린 창에서 직접 로그인하면 다음 조회부터 전체 값이 표시된다.
 export const initSession = async (): Promise<void> => {
-  // 사용자가 직접 로그인해야 하므로 headful 모드로 실행한다
+  // 사용자가 선택적으로 직접 로그인할 수 있도록 headful 모드로 실행한다
   browser = await chromium.launch({ headless: false })
   context = await browser.newContext(hasAuthState() ? { storageState: AUTH_STATE_PATH } : {})
   page = await context.newPage()
 
-  await page.goto(ORIGIN, { waitUntil: 'domcontentloaded' }).catch(() => {})
+  // 사이트 페이지를 열어둔 채 유지해 사이트 스크립트가 세션을 계속 갱신하도록 한다
+  await page.goto(ASSIGNMENT_URL, { waitUntil: 'networkidle', timeout: 45_000 }).catch(() => {})
 
   if (await isAuthenticated(context)) {
     console.log('기존 세션으로 로그인이 확인되었습니다.')
   } else {
-    console.log('\n로그인이 필요합니다. 열린 브라우저 창에서 직접 로그인해 주세요.')
-    console.log('아이디와 비밀번호는 저장되지 않습니다.\n')
-    await page.goto(SIGN_IN_URL, { waitUntil: 'domcontentloaded' })
-    await page.waitForResponse(isSignInSuccess, { timeout: LOGIN_TIMEOUT_MS })
-    await page.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => {})
-
-    if (!(await isAuthenticated(context))) {
-      throw new Error('로그인 후에도 인증에 실패했습니다. BFF를 다시 시작해 주세요.')
-    }
-    console.log('로그인이 완료되었습니다.')
+    console.log('\n로그인 없이 마스킹된 목록을 표시합니다.')
+    console.log('전체 지표를 보려면 열린 브라우저 창에서 직접 로그인하세요. (계정 정보는 저장되지 않습니다)\n')
   }
-
-  // 사이트 페이지를 열어둔 채 유지해 사이트 스크립트가 세션을 계속 갱신하도록 한다
-  await page.goto(ASSIGNMENT_URL, { waitUntil: 'networkidle', timeout: 45_000 }).catch(() => {})
 
   ready = true
   startKeepAlive()
@@ -134,17 +114,23 @@ export const fetchAssignmentList = async (type: AssignmentType): Promise<Broadca
     throw new AuthRequiredError('세션이 아직 준비되지 않았습니다')
   }
 
-  // 세션이 살아있는지 먼저 확인한다 (만료 시 명확한 에러 반환)
-  if (!(await isAuthenticated(context))) {
-    throw new AuthRequiredError('세션이 만료되었습니다')
+  // 사용자가 창에서 직접 로그인하면 원본이 /assignment를 벗어나 다른 페이지로 이동한다.
+  // 그 상태에서는 탭 버튼을 찾지 못해 클릭이 오래 대기하므로, 조회 전 /assignment로 복귀시킨다.
+  if (!page.url().startsWith(ASSIGNMENT_URL)) {
+    await page.goto(ASSIGNMENT_URL, { waitUntil: 'networkidle', timeout: 30_000 }).catch(() => {})
   }
 
-  // 해당 탭을 클릭해 테이블을 전환하고, 테이블 갱신(assignment/list 응답)을 기다린다
+  // 로그인 여부와 무관하게 조회한다. 비로그인이면 지표가 마스킹된 값이 그대로 스크래핑된다.
+  // 해당 탭을 클릭해 테이블을 전환하고, 테이블 갱신(assignment/list 응답)을 기다린다.
+  // 탭 버튼이 없거나 이미 활성인 경우를 대비해 클릭 타임아웃을 짧게 둔다.
   await Promise.all([
     page
       .waitForResponse((r) => r.url().includes('/api/assignment/list'), { timeout: 8_000 })
       .catch(() => {}),
-    page.getByRole('button', { name: TAB_LABEL[type], exact: true }).click().catch(() => {}),
+    page
+      .getByRole('button', { name: TAB_LABEL[type], exact: true })
+      .click({ timeout: 5_000 })
+      .catch(() => {}),
   ])
   await page.waitForTimeout(600)
 
@@ -176,6 +162,12 @@ const stopKeepAlive = () => {
 
 // 세션 준비 여부
 export const isSessionReady = () => ready
+
+// 현재 로그인(인증) 상태 여부 — 비로그인이면 지표가 마스킹된다
+export const isLoggedIn = async (): Promise<boolean> => {
+  if (!ready || !context) return false
+  return isAuthenticated(context)
+}
 
 // 서버 종료 시 브라우저를 정리한다
 export const closeBrowser = async () => {
