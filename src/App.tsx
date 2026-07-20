@@ -1,14 +1,19 @@
+import { useState } from 'react'
+import { AssignmentTabs } from './components/AssignmentTabs.tsx'
 import { AssignmentTable } from './components/AssignmentTable.tsx'
 import { useAssignment } from './hooks/useAssignment.ts'
+import type { AssignmentType } from './types/assignment.ts'
 import './App.css'
 
-// Task 10 확인용 화면 — 탭/에러 상태 컴포넌트는 이후 Task에서 구현한다
+// LIVE / 홈쇼핑 탭을 전환하며 방송 목록을 표시한다
 function App() {
-  const { status, data, errorCode, errorMessage } = useAssignment('live')
+  const [type, setType] = useState<AssignmentType>('live')
+  const { status, data, errorCode, errorMessage } = useAssignment(type)
 
   return (
     <div className="app">
       <h1>라이브커머스 방송 목록</h1>
+      <AssignmentTabs active={type} onChange={setType} />
       {status === 'loading' && <p>불러오는 중…</p>}
       {status === 'error' && (
         <p className="error">
