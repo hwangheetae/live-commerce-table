@@ -12,10 +12,33 @@
 
 ## 2. 사전 준비 및 실행 방법
 
+### 실행 환경 (버전 고정)
+
+이 프로젝트는 아래 버전으로만 동작하도록 **고정**되어 있습니다. `.npmrc`에 `engine-strict=true`가 켜져 있어, 버전이 다르면 `pnpm install`이 **중단**됩니다.
+
+| 도구 | 버전 | 확인 명령 |
+| --- | --- | --- |
+| Node.js | `24.13.1` | `node -v` |
+| pnpm | `10.33.0` | `pnpm -v` |
+| npm | `11.8.0` | `npm -v` |
+
+> Node는 `.npmrc`의 `use-node-version=24.13.1` 설정 덕분에 pnpm이 **자동으로 해당 버전을 내려받아** 사용하므로 별도로 맞추지 않아도 됩니다. (corepack이 켜져 있어야 합니다.)
+
+#### pnpm이 없다면 (처음 한 번만)
+
 ```bash
-pnpm install
-pnpm exec playwright install chromium   # BFF가 띄울 Chromium
-pnpm dev                                 # BFF(:5174) + Vite(:5173) 동시 실행
+# Node.js 24.13.1 설치 후 (nvm 사용 시: nvm install 24.13.1 && nvm use 24.13.1)
+corepack enable            # Node에 기본 내장된 pnpm 관리자 활성화
+corepack prepare pnpm@10.33.0 --activate   # 요구 버전의 pnpm 준비
+pnpm -v                    # 10.33.0 이 나오면 준비 완료
+```
+
+### 설치 및 실행
+
+```bash
+pnpm install                            # 의존성 설치 (버전이 다르면 여기서 중단됨)
+pnpm exec playwright install chromium   # BFF가 띄울 Chromium 내려받기
+pnpm dev                                # BFF(:5174) + Vite(:5173) 동시 실행
 ```
 
 1. `pnpm dev` 실행 → BFF가 Chromium 창을 띄우고, 콘솔에 `데이터 조회 준비 완료.`가 뜨면 준비 완료입니다.
