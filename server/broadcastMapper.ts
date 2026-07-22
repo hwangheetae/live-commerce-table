@@ -1,15 +1,16 @@
-import type { Broadcast } from './assignmentProxy.ts'
+import type { Broadcast } from '../src/types/assignment.ts'
 
 const GNB_URL = 'https://live.ecomm-data.com/api/home/gnb'
-
-// 원본 번들(모듈 47002)에 정적으로 박혀 있는 platform_id → 표시명 매핑
-// no_crawl: true인 플랫폼은 항상 지표가 "🚧"로 마스킹된다
 interface PlatformInfo {
   name: string
   short_name?: string
   no_crawl?: boolean
 }
 
+/**
+ * @summary platform_id → 표시명 매핑 (원본 번들 모듈 47002에 정적으로 박혀 있음)
+ * @description no_crawl: true인 플랫폼은 항상 지표가 "🚧"로 마스킹된다.
+ */
 export const PLATFORM_NAMES: Record<string, PlatformInfo> = {
   baemin: { name: '배민라이브', no_crawl: true },
   cjonstyle: { name: 'CJ온스타일', short_name: '온스타일' },
@@ -63,7 +64,9 @@ export const PLATFORM_NAMES: Record<string, PlatformInfo> = {
   gongyoung: { name: '공영라방' },
 }
 
-// 원본 번들의 convert_ko_day와 동일한 요일 매핑 (0=일 ~ 6=토)
+/**
+ * @summary 요일 매핑 (0=일 ~ 6=토, 원본 번들 convert_ko_day와 동일)
+ */
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토']
 
 interface CategoryInfo {
@@ -75,9 +78,11 @@ interface GnbResponse {
   cats: Record<string, CategoryInfo>
 }
 
-// /api/home/gnb 응답을 서버 시작 시 1회 캐시한다 (인증 불필요, 카테고리는 자주 바뀌지 않음)
 let categoryMap: Record<string, CategoryInfo> | null = null
 
+/**
+ * @summary GNB API에서 카테고리 맵(cid → 표시명)을 로딩해 캐싱한다.
+ */
 export const loadCategoryMap = async (): Promise<void> => {
   const res = await fetch(GNB_URL, {
     method: 'POST',
@@ -88,42 +93,53 @@ export const loadCategoryMap = async (): Promise<void> => {
   categoryMap = data.cats
 }
 
-// 라이브 전용: cid → 부모 카테고리명 (원본 렌더 로직: cats[cid]?.pid || cid → 그 name)
+/**
+ * @summary 라이브 전용: cid → 부모 카테고리명으로 변환한다.
+ * @description 원본 렌더 로직(cats[cid]?.pid || cid → 그 name)을 그대로 따른다.
+ */
 const resolveLiveCategory = (cid: number): string => {
   const cats = categoryMap ?? {}
   const parentId = cats[cid]?.pid ?? cid
   return cats[parentId]?.name ?? ''
 }
 
-// 원본 번들의 n_format 포팅: 만/억/조 단위 축약 + 유효자릿수 규칙 + 천단위 콤마
-const UNITS = [
-  { value: 1, symbol: '' },
-  { value: 1e4, symbol: '만' },
-  { value: 1e8, symbol: '억' },
-  { value: 1e12, symbol: '조' },
+/**
+ * @summary 숫자 축약 단위 (내림차순).
+ * @description 큰 단위부터 탐색하므로 미리 내림차순으로 둔다 (호출마다 복사 방지).
+ */
+const UNITS_DESC = [
   { value: 1e16, symbol: '경' },
+  { value: 1e12, symbol: '조' },
+  { value: 1e8, symbol: '억' },
+  { value: 1e4, symbol: '만' },
+  { value: 1, symbol: '' },
 ]
 
+/**
+ * @summary 원본 번들 n_format 포팅: 만/억/조 단위 축약 + 유효자릿수 규칙 + 천단위 콤마.
+ */
 const formatNumber = (value: number | null): string => {
   if (value == null) return '0'
   let digits = 2
-  const unit = [...UNITS].reverse().find((u) => {
+  const unit = UNITS_DESC.find((u) => {
     if (u.value <= value) {
       const ratio = value / u.value
       if (ratio >= 10) digits = 1
       if (ratio >= 100) digits = 0
-      if (ratio >= 1000) digits = 0
       return true
     }
     return false
   })
+
   if (!unit) return '0'
   const num = (value / unit.value).toFixed(digits).replace(/\.0+$|(\.[0-9]*[1-9])0+$/, '$1')
   return num.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + unit.symbol
 }
 
-// 비로그인이면 무조건 "🔒 로그인"으로 마스킹된다.
-// 로그인 상태에서는 값이 없어도(no_crawl 플랫폼 포함) 그냥 "-"로 표시된다 (원본 동작 실측으로 확인)
+/**
+ * @summary 로그인 여부에 따라 지표 값을 마스킹한다.
+ * @description 비로그인이면 "🔒 로그인", 로그인 상태에서 값이 없으면(no_crawl 포함) "-"
+ */
 const maskedNumber = (value: number | null, authenticated: boolean): string => {
   if (!authenticated) return '🔒 로그인'
   if (value == null) return '-'
@@ -137,7 +153,16 @@ interface DateTimeParts {
   time: string
 }
 
-const toDateTimeParts = (year: number, month: number, day: number, hour: string, minute: string): DateTimeParts => {
+/**
+ * @summary 연·월·일·시·분을 화면 표시용 날짜/시간 문자열로 조합한다.
+ */
+const toDateTimeParts = (
+  year: number,
+  month: number,
+  day: number,
+  hour: string,
+  minute: string,
+): DateTimeParts => {
   const weekday = WEEKDAYS[new Date(year, month - 1, day).getDay()]
   const yy = String(year).slice(-2)
   const mm = String(month).padStart(2, '0')
@@ -145,7 +170,9 @@ const toDateTimeParts = (year: number, month: number, day: number, hour: string,
   return { date: `${yy}.${mm}.${dd} (${weekday})`, time: `${hour}:${minute}` }
 }
 
-// 라이브: 10자리 YYMMDDHHmm
+/**
+ * @summary 라이브 시작시각 파싱 (10자리 YYMMDDHHmm)
+ */
 const formatLiveDateTime = (raw: string): DateTimeParts => {
   const s = raw.toString()
   const year = 2000 + Number(s.slice(0, 2))
@@ -154,7 +181,9 @@ const formatLiveDateTime = (raw: string): DateTimeParts => {
   return toDateTimeParts(year, month, day, s.slice(6, 8), s.slice(8, 10))
 }
 
-// 홈쇼핑: 12자리 YYYYMMDDHHmm
+/**
+ * @summary 홈쇼핑 시작시각 파싱 (12자리 YYYYMMDDHHmm)
+ */
 const formatHsDateTime = (raw: string): DateTimeParts => {
   const s = raw.toString()
   const year = Number(s.slice(0, 4))
@@ -186,6 +215,9 @@ export interface RawHsItem {
   cat: { cid: number; cat_name: string } | null
 }
 
+/**
+ * @summary 라이브 원시 데이터를 화면 표시용 Broadcast로 변환한다.
+ */
 export const mapLiveItem = (raw: RawLiveItem, rank: number, authenticated: boolean): Broadcast => {
   const { date, time } = formatLiveDateTime(raw.datetime_start)
   return {
@@ -202,6 +234,9 @@ export const mapLiveItem = (raw: RawLiveItem, rank: number, authenticated: boole
   }
 }
 
+/**
+ * @summary 홈쇼핑 원시 데이터를 화면 표시용 Broadcast로 변환한다.
+ */
 export const mapHsItem = (raw: RawHsItem, rank: number, authenticated: boolean): Broadcast => {
   const { date, time } = formatHsDateTime(raw.hsshow_datetime_start)
   return {
