@@ -1,70 +1,58 @@
 # 라이브커머스 방송 목록 테이블
 
-원본 사이트(live.ecomm-data.com)의 **LIVE / 홈쇼핑** 방송 목록을 실시간으로 조회해 테이블로 표시하는 과제입니다. 정적 스냅샷이 아니라, 원본 `/api/assignment/list`를 조회 시점에 직접 호출해 값을 그대로 가져옵니다.
+원본 사이트(live.ecomm-data.com)의 **LIVE / 홈쇼핑** 방송 목록을 조회해 React 테이블로 표시하는 과제입니다. 원본 `/api/assignment/list`를 조회 시점에 직접 호출해 값을 가져오며, 원본 페이지와 동일한 가공을 거쳐 렌더링합니다.
 
-**로그인은 선택 사항입니다.** 비로그인 상태에서도 목록이 표시되며(조회수·판매량·매출액 등 지표는 자물쇠로 마스킹), 열린 창에서 직접 로그인하면 다음 조회부터 전체 값이 표시됩니다.
+로그인은 **선택**입니다. 비로그인 상태에서도 목록이 보이며(지표는 마스킹), 열린 창에서 직접 로그인하면 다음 조회부터 전체 값이 표시됩니다.
 
-## 스택
+## 1. 스택
 
 - React 19 + TypeScript(strict) + Vite
-- BFF: Express + Playwright (tsx 실행)
+- BFF: Express 5 + Playwright (tsx 실행)
 - pnpm / Node 24
 
-## 동작 구조
-
-```
-브라우저(React)  ──/api──▶  로컬 BFF(Express, :5174)  ──▶  원본 사이트(Playwright 브라우저)
-```
-
-- React 앱은 **로컬 BFF만** 호출합니다. 원본 도메인을 직접 부르지 않습니다(CORS·쿠키·봇 차단 회피).
-- BFF는 Playwright로 실제 Chromium을 띄워 원본 `/assignment` 페이지를 열어 둡니다(로그인 UX·세션 유지 목적). 조회 시에는 그 브라우저 컨텍스트로 원본 `/api/assignment/list`를 **JSON으로 직접 호출**하고, 응답 원시값(`platform_id`, `cid`, `datetime_start` 등)을 원본 페이지의 렌더 로직과 동일하게 서버에서 가공해 반환합니다(플랫폼명, 카테고리명, 날짜/요일/시간, 숫자 단위 축약, 로그인 마스킹). 이 가공 로직은 `server/broadcastMapper.ts`에 있습니다.
-- 로그인은 강제하지 않습니다. 사용자가 그 창에서 **직접 로그인**하면 전체 지표가 보이며, 계정 정보는 저장·하드코딩하지 않습니다.
-
-> 원본 서버는 TLS 지문 기반으로 일반 fetch(undici)를 차단하므로, 실제 브라우저 컨텍스트를 소유하는 BFF 방식을 사용합니다.
-
-## 사전 준비
+## 2. 사전 준비 및 실행 방법
 
 ```bash
 pnpm install
-pnpm exec playwright install chromium
+pnpm exec playwright install chromium   # BFF가 띄울 Chromium
+pnpm dev                                 # BFF(:5174) + Vite(:5173) 동시 실행
 ```
 
-## 실행
+1. `pnpm dev` 실행 → BFF가 Chromium 창을 띄우고, 콘솔에 `데이터 조회 준비 완료.`가 뜨면 준비 완료입니다.
+2. 브라우저에서 `http://localhost:5173` 접속 → 상단 **LIVE / 홈쇼핑** 탭으로 목록 확인 (각 최대 10개).
+3. **로그인 없이 바로** 목록을 볼 수 있습니다. 지표(조회수·판매량·매출액)는 🔒로 마스킹됩니다.
+4. 전체 지표를 보려면 열린 Chromium 창에서 **직접 로그인**하세요. 로그인 후 `/assignment`로 자동 이동하며 '새로고침' 후 다음 조회부터 전체 값이 표시됩니다.
 
-```bash
-pnpm dev
-```
+## 3. 생각의 흐름
 
-- BFF와 Vite가 함께 실행됩니다.
-- BFF가 Chromium 창을 띄우고, 콘솔에 `데이터 조회 준비 완료.`가 뜨면 준비된 것입니다. **로그인 없이 바로 목록을 볼 수 있습니다.**
-- 전체 지표를 보려면 그 Chromium 창에서 직접 로그인하세요. 로그인 후에는 다음 조회부터 전체 값이 표시됩니다.
-- 브라우저에서 `http://localhost:5173` 접속 → 상단 LIVE / 홈쇼핑 탭으로 목록을 확인합니다. (각 목록 최대 10개)
+> 처음 생각 → 부딪힌 문제 → 수정 → 최종 구현 순으로 정리했습니다.
 
-## 세션 유지 / 만료
+**① 최초 요구사항 해석**
+원본 페이지가 쓰는 API를 찾아 그 응답을 React 테이블에 렌더링하면 된다고 봤습니다.
 
-- 원본 세션은 슬라이딩 TTL이 짧아, BFF가 20초 간격으로 실제 조회를 보내 세션을 갱신합니다.
-- 로그인 세션이 만료되면 다시 비로그인(마스킹) 상태가 됩니다. 열린 창에서 다시 로그인하면 전체 값이 복구됩니다.
-- 원본은 단일 세션 정책이라, 다른 브라우저에서 같은 계정으로 로그인하면 BFF 세션이 끊길 수 있습니다.
+**② 페이지 분석**
+최초 진입 시 SSR로 테이블이 그려지고, 탭 변경 시 `POST /api/assignment/list`가 호출됨을 확인. **별도 크롤링 없이 내부 API만 직접 부르면 되겠다**고 판단했습니다.
 
-## 스크립트
+**③ 비로그인 마스킹 문제 발견**
+비로그인으로 API를 부르면 `visit_cnt`, `sales_cnt`, `sales_amt`가 전부 `null`로 내려왔습니다. → 인증이 필요하다.
 
-| 명령 | 설명 |
-| --- | --- |
-| `pnpm dev` | BFF + Vite 동시 실행 |
-| `pnpm build` | 타입 체크 + 프로덕션 빌드 |
-| `pnpm lint` | ESLint 검사 |
-| `pnpm format` | Prettier 포맷팅 |
+**④ 인증 호출 방식 검토 (React → Node BFF → 원본 API)**
+Node BFF가 인증 쿠키를 실어 원본 API를 부르면 브라우저의 CORS·쿠키 제약을 피할 수 있다고 봤습니다. 하지만 쿠키가 원본 도메인 귀속 **HttpOnly**라 로컬에서 읽거나 재사용할 수 없었습니다.
 
-## 프로젝트 구조
+**⑤ Playwright 세션 방식으로 전환 (여기서 한 번 수정)**
+처음엔 `storageState`를 파일로 저장해 두고 Node가 그 파일을 로드해 API를 호출하려 했습니다. 그러나 원본 세션이 **로그인된 Chromium 인스턴스의 실제 TLS 연결 자체에 바인딩**되어 있어, storageState 파일만 다른 프로세스로 넘겨서는 인증이 재사용되지 않았습니다.
+→ 방식 폐기. 대신 **BFF가 로그인된 브라우저를 프로세스 수명 동안 직접 띄운 채 유지**하고, 사용자가 그 창에서 직접 로그인하며, 20초 keep-alive 폴링으로 세션 만료를 막는 구조로 바꿨습니다.
 
-```
-src/
-  components/  AssignmentTabs, AssignmentTable, LoadingState, ErrorState
-  hooks/       useAssignment      # 조회 상태 관리, 탭 전환 시 재조회
-  api/         assignmentApi      # 로컬 BFF 호출
-  types/       assignment
-server/
-  index.ts            # Express 라우트 (/api/assignment, /api/health)
-  assignmentProxy.ts  # Playwright 세션 관리 + /api/assignment/list 직접 호출
-  broadcastMapper.ts  # 원본 렌더 로직 재현 (플랫폼명/카테고리/날짜·시간/숫자 포맷/마스킹)
-```
+**⑥ API 원시값과 실제 화면이 불일치하는 핵심 문제 발견**
+`platform_id: "cjonstyle"`, `cid: 50000167`, `datetime_start: "2607202145"` 같은 원시 필드가 화면 표시값(`CJ온스타일`, `패션의류`, `26.07.20 (월) 21:45`)과 달랐습니다.
+
+**⑦ 렌더된 테이블을 그대로 긁는 방식 시도 (다시 수정)**
+"원본 테이블과 동일한 값"이라는 요구를 빠르게 만족시키려, API 가공 대신 **원본이 이미 렌더한 DOM 텍스트를 `page.evaluate`로 그대로 읽어오는** 방식을 택했습니다. 동작은 했지만 DOM 구조에 의존해 취약했습니다.
+
+**⑧ 최종: 매핑 근거를 찾아 API 원시값을 직접 가공**
+JS 번들(모듈 `47002`)에 `platform_id → 표시명` 정적 맵이 박혀 있고, `POST /api/home/gnb` 응답으로 `cid → 카테고리(pid)`를 해석할 수 있음을 확인했습니다.
+→ DOM 스크래핑을 폐기하고, **원본의 렌더 로직을 서버(`broadcastMapper.ts`)에 그대로 재현**해 API 원시값을 직접 가공하는 방식으로 최종 리팩토링했습니다.
+
+**정리:** `내부 API 직접 호출` → `Playwright 파일 세션` → `Playwright 상주 세션` → `DOM 스크래핑` → **`API 원시값 서버 가공`**
+
+---
