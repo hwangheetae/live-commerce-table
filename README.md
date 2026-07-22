@@ -46,10 +46,6 @@ pnpm dev
 - 로그인 세션이 만료되면 다시 비로그인(마스킹) 상태가 됩니다. 열린 창에서 다시 로그인하면 전체 값이 복구됩니다.
 - 원본은 단일 세션 정책이라, 다른 브라우저에서 같은 계정으로 로그인하면 BFF 세션이 끊길 수 있습니다.
 
-## 인증 파일
-
-- 로그인 상태는 `.playwright/auth.json`에 저장되며 `.gitignore`로 제외됩니다. 저장소에 커밋되지 않습니다.
-
 ## 스크립트
 
 | 명령 | 설명 |
@@ -71,5 +67,4 @@ server/
   index.ts            # Express 라우트 (/api/assignment, /api/health)
   assignmentProxy.ts  # Playwright 세션 관리 + /api/assignment/list 직접 호출
   broadcastMapper.ts  # 원본 렌더 로직 재현 (플랫폼명/카테고리/날짜·시간/숫자 포맷/마스킹)
-  authState.ts        # 인증 파일 경로 관리
 ```
