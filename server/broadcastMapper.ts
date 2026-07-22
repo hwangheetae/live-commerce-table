@@ -246,8 +246,8 @@ export const mapHsItem = (raw: RawHsItem, rank: number, authenticated: boolean):
     category: raw.cat?.cat_name ?? '',
     date,
     time,
-    // 홈쇼핑 "시청률" 컬럼은 원본에서도 준비중 이미지만 표시되고 텍스트가 없다
-    visitCount: '',
+    // 홈쇼핑 "시청률" 컬럼은 원본에서 준비중 상태다. 값이 없음을 🚧로 표시한다
+    visitCount: '🚧',
     salesCount: maskedNumber(raw.sales_cnt, authenticated),
     salesAmount: maskedNumber(raw.sales_amt, authenticated),
     productCount: formatNumber(raw.item_cnt),
