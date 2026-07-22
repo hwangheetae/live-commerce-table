@@ -5,11 +5,8 @@ interface AssignmentTableProps {
 }
 
 // 방송 목록을 원본 과제 테이블과 동일한 레이아웃으로 표시한다
-// 값은 스크래핑한 원본 텍스트를 그대로 사용한다
 export const AssignmentTable = ({ data }: AssignmentTableProps) => {
-  if (data.length === 0) {
-    return <p>표시할 방송이 없습니다.</p>
-  }
+  if (data.length === 0) return <p>표시할 방송이 없습니다.</p>
 
   return (
     <table className="assignment-table">

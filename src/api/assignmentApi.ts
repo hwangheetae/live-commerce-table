@@ -18,7 +18,7 @@ export class ApiError extends Error {
 }
 
 // 로컬 BFF(/api/assignment)를 통해 방송 목록을 조회한다
-// BFF가 원본 페이지 테이블을 스크래핑해 이미 완성된 값을 반환하므로 별도 변환이 없다
+// BFF가 원본 API 원시값을 표시용 문자열로 가공해 반환하므로 별도 변환이 없다
 export const fetchAssignment = async (
   type: AssignmentType,
   signal: AbortSignal,
