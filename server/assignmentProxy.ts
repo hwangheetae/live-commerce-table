@@ -56,6 +56,23 @@ const isAuthenticated = async (ctx: BrowserContext): Promise<boolean> => {
 }
 
 /**
+ * @summary 로그인 성공 후 사이트가 다른 경로로 이동하면 다시 /assignment로 돌려보낸다.
+ * @description 사용자가 열린 창에서 직접 로그인하면 사이트가 보통 홈('/')으로 리다이렉트한다. 이때 로그인 상태가 확인되면 조회 대상인 /assignment 페이지로 되돌린다 (이미 assignment면 무시해 무한 이동 방지).
+ */
+const watchLoginRedirect = (page: Page, ctx: BrowserContext) => {
+  page.on('framenavigated', (frame) => {
+    if (frame !== page.mainFrame()) return
+    if (frame.url().startsWith(ASSIGNMENT_URL)) return
+
+    void isAuthenticated(ctx).then((authenticated) => {
+      if (authenticated) {
+        page.goto(ASSIGNMENT_URL, { waitUntil: 'networkidle' }).catch(() => {})
+      }
+    })
+  })
+}
+
+/**
  * @summary BFF 시작 시 브라우저를 띄우고 조회용 컨텍스트를 확보한다.
  * @description 로그인은 강제하지 않는다. 비로그인 상태에서도 원본 페이지는 목록을 렌더링하며(지표만 마스킹), 사용자가 열린 창에서 직접 로그인하면 다음 조회부터 전체 값이 표시된다.
  */
@@ -66,6 +83,10 @@ export const initSession = async (): Promise<void> => {
 
   // 사이트 페이지를 열어둔 채 유지해 사이트 스크립트가 세션을 계속 갱신하도록 한다
   const page: Page = await context.newPage()
+
+  // 로그인 완료 시 /assignment 페이지로 이동시키는 감시자 등록
+  watchLoginRedirect(page, context)
+
   await page.goto(ASSIGNMENT_URL, { waitUntil: 'networkidle', timeout: 45_000 }).catch(() => {})
 
   // 분류(cid) 표시명을 위한 카테고리 맵 로딩 (인증 불필요, 서버 수명 동안 1회면 충분)
