@@ -13,12 +13,6 @@ const API_URL = `${ORIGIN}/api/assignment/list`
 const ASSIGNMENT_URL = `${ORIGIN}/assignment`
 
 /**
- * @summary 세션 갱신용 조회 주기(ms).
- * @description 원본 세션은 슬라이딩 TTL이 짧아 방치하면 만료. 주기적으로 조회를 보내 세션을 갱신 (20초 간격은 실측으로 검증).
- */
-const KEEP_ALIVE_INTERVAL_MS = 20_000
-
-/**
  * @summary 세션(브라우저)이 아직 준비되지 않은 경우
  */
 export class AuthRequiredError extends Error {}
@@ -39,7 +33,6 @@ interface AssignmentResponse {
 let browser: Browser | null = null
 let context: BrowserContext | null = null
 let ready = false
-let keepAliveTimer: NodeJS.Timeout | null = null
 
 /**
  * @summary 현재 컨텍스트가 로그인 인증 상태인지 확인한다.
@@ -100,7 +93,6 @@ export const initSession = async (): Promise<void> => {
   )
 
   ready = true
-  startKeepAlive()
   console.log('데이터 조회 준비 완료.')
 }
 
@@ -141,28 +133,6 @@ export const fetchAssignmentList = async (type: AssignmentType): Promise<Broadca
 }
 
 /**
- * @summary 살아있는 컨텍스트로 주기적으로 실제 조회를 보내 세션을 갱신한다.
- * @description 페이지 새로고침은 오히려 세션을 끊고, ping은 세션 유지에 부족함을 실측으로 확인.
- */
-const startKeepAlive = () => {
-  stopKeepAlive()
-  keepAliveTimer = setInterval(() => {
-    context?.request.post(API_URL, { data: { type: 'hs' } }).catch(() => {})
-  }, KEEP_ALIVE_INTERVAL_MS)
-  keepAliveTimer.unref()
-}
-
-/**
- * @summary keep-alive 타이머를 정지한다
- */
-const stopKeepAlive = () => {
-  if (keepAliveTimer) {
-    clearInterval(keepAliveTimer)
-    keepAliveTimer = null
-  }
-}
-
-/**
  * @summary 세션 준비 여부
  */
 export const isSessionReady = () => ready
@@ -180,7 +150,6 @@ export const isLoggedIn = async (): Promise<boolean> => {
  * @summary 서버 종료 시 브라우저를 정리한다
  */
 export const closeBrowser = async () => {
-  stopKeepAlive()
   await browser?.close().catch(() => {})
   browser = null
   context = null
